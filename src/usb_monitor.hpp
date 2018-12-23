@@ -8,7 +8,7 @@
 #include <string.h>
 #include <sys/select.h>
 #include <sys/time.h>
-#include "utils.h"
+#include "utils.hpp"
 
 class UsbMonitor
 {
