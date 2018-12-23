@@ -10,23 +10,14 @@
 #include <sys/time.h>
 #include "utils.hpp"
 
-class UsbMonitor
+namespace  UsbMonitor
 {
-private:
-    struct udev* _udev;
-    struct udev_device* u_dev;
-    struct udev_monitor* mon;
-    const char* server_ip;
-    int server_port;
-    int fd;       // File descriptor for the monitor.
 
-    void report_usb_device();
-
-public:
-    UsbMonitor(struct udev* u, const char* s_ip, int s_p) : _udev(u), server_ip(s_ip), server_port(s_p) {}
-    void start();
+    void init(struct udev*, const std::string, const unsigned short) ;
+    void start [[noreturn]] ();
+    void report_usb_device(const std::string);
     void stop();
-    virtual ~UsbMonitor() { stop(); }
-};
+    void signal_handler [[noreturn]] (int);
+}
 
 #endif // USB_MONITOR_HPP_INCLUDED

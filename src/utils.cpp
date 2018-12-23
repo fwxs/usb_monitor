@@ -1,32 +1,29 @@
 #include "utils.hpp"
 
+static int sockfd;
+static struct sockaddr_in server_addr;
 
-void Utils::err_exit(const std::string msg, unsigned int status)
+void Utils::err_exit(const std::string msg, int status)
 {
-    std::cerr << "Error (" << status << "): " << msg << std::endl;
-    exit(status);
+    std::cerr << "Error (" << status << "): " << msg << ". " << strerror(status) << std::endl;
+    std::exit(status);
 }
 
-void Utils::fatal(const char* msg, unsigned int status)
+void Utils::fatal(const std::string msg, int status)
 {
-    perror(msg);
-    exit(status);
+    perror(msg.c_str());
+    std::exit(status);
 }
 
 void Utils::wait()
 {
-    struct timespec req = {0, Utils::HALF_SEC_NANO}, rem = {0, 0};
-
-    if(nanosleep(&req, &rem) < 0){
-        int errsv = errno;
-        fatal("nanosleep", errsv);
-    }
+    std::this_thread::sleep_for(std::chrono::nanoseconds(Utils::HALF_SEC_NANO));
 }
 
-std::string Utils::serialize_data(const char* action,
-                                  const char* dev_type,
-                                  const char* dev_path,
-                                  const char* dev_name)
+std::string Utils::serialize_data(const std::string action,
+                                  const std::string dev_type,
+                                  const std::string dev_path,
+                                  const std::string dev_name)
 {
     Json::Value json_str;
     Json::StreamWriterBuilder stream_builder;
@@ -41,7 +38,9 @@ std::string Utils::serialize_data(const char* action,
     return Json::writeString(stream_builder, json_str);
 }
 
-void Utils::send_data(const char* server_ip, int port, std::string msg)
+void Utils::send_data(const std::string server_ip,
+                      const unsigned short port,
+                      const std::string msg)
 {
     std::unique_ptr<Utils::Socket> send_sock(new Utils::Socket(server_ip, port));
     send_sock->start();
@@ -61,7 +60,7 @@ void Utils::Socket::start()
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(server_port);
 
-    if(inet_pton(AF_INET, server_ip, &server_addr.sin_addr) <= 0){
+    if(inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr) <= 0){
         int errsv = errno;
         Utils::fatal("inet_pton", errsv);
     }
@@ -69,19 +68,19 @@ void Utils::Socket::start()
     /* Zero out unused structure variable */
     memset(&server_addr.sin_zero, 0, sizeof(server_addr));
 
-    if(connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0){
+    if(connect(sockfd, reinterpret_cast<struct sockaddr *>(&server_addr), sizeof(server_addr)) < 0){
         int errsv = errno;
-        fatal("connect failed", errsv);
+        Utils::fatal("connect failed", errsv);
     }
 }
 
-void Utils::Socket::send_(std::string msg)
+void Utils::Socket::send_(const std::string msg)
 {
     std::cout << "Sending " << msg.length() << " bytes of data." << std::endl;
 
     if(send(sockfd, msg.c_str(), msg.length(), 0) < 0){
         int errsv = errno;
-        fatal("send failed", errsv);
+        Utils::fatal("send failed", errsv);
     }
 }
 
@@ -89,35 +88,29 @@ void Utils::Socket::stop()
 {
     if(close(sockfd) < 0){
         int errsv = errno;
-        fatal("close", errsv);
+        Utils::fatal("close", errsv);
     }
 }
 
 uintmax_t Utils::strtoumax_(const char* str)
 {
     uintmax_t ret = strtoumax(str, nullptr, 10);
-    if(ret == 0 || ( ret == UINTMAX_MAX && errno == ERANGE))
-        err_exit("strtoumax failed", ERANGE);
-
+    if(ret <= 0 || ( ret == UINTMAX_MAX && errno == ERANGE))
+        Utils::err_exit("strtoumax failed", ERANGE);
     return ret;
-
 }
 
-
-void Utils::signal_handler(int signum)
-{
-    std::cout << "Interrupt signal (" << signum << ")" << std::endl;
-    exit(signum);
-}
-
-void Utils::sigaction_(int signal_num)
+void Utils::sigaction_(void (*func)(int))
 {
     struct sigaction sa;
-    sa.sa_handler = signal_handler;
+
+    memset(&sa, 0, sizeof (struct sigaction));
+
+    sa.sa_handler = func;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
 
-    if(sigaction(signal_num, &sa, NULL) == -1){
+    if(sigaction(SIGINT, &sa, nullptr) == -1){
         int errsv = errno;
         Utils::fatal("sigaction", errsv);
     }

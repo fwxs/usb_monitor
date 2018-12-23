@@ -1,21 +1,23 @@
 #include "usb_monitor.hpp"
 
+
 int main(int argc, char** argv)
 {
-    Utils::sigaction_(SIGINT);
+    Utils::sigaction_(UsbMonitor::signal_handler);
+
     if(argc != 3){
         std::cout << "Usage: " << argv[0] << " <server ip> <port>" << std::endl;
         exit(1);
     }
 
-    uintmax_t portno = Utils::strtoumax_(argv[2]);
+    unsigned short portno = static_cast<unsigned short>(Utils::strtoumax_(argv[2]));
 
-    struct udev* _udev;
-    if((_udev = udev_new()) == nullptr){
+    struct udev* u_obj;
+    if((u_obj = udev_new()) == nullptr){
         std::cerr << "Error creating udev object" << std::endl;
         exit(EXIT_FAILURE);
     }
-    std::unique_ptr<UsbMonitor> usb_monitor(new UsbMonitor(_udev, argv[1], portno));
-    usb_monitor->start();
+    UsbMonitor::init(u_obj, std::string(argv[1]), portno);
+    UsbMonitor::start();
     return 0;
 }
