@@ -1,4 +1,4 @@
-#include "usb_monitor.h"
+#include "usb_monitor.hpp"
 
 int main(int argc, char** argv)
 {

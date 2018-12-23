@@ -1,4 +1,4 @@
-#include "usb_monitor.h"
+#include "usb_monitor.hpp"
 
 /*
  Code based on http://www.signal11.us/oss/udev/
