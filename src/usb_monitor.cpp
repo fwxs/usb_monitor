@@ -3,88 +3,103 @@
 /*
  Code based on http://www.signal11.us/oss/udev/
 */
-
-
-static struct udev* udev_obj;
-static struct udev_device* u_dev;
-static struct udev_monitor* mon;
+static std::unique_ptr<Udev> u;
+static std::map<std::string, std::map<std::string, std::string>> devices;
 static std::string server_ip;
 static unsigned short server_port;
 
-void UsbMonitor::init(struct udev* u, const std::string s_ip, const unsigned short s_p)
+void UsbMonitor::init(const std::string &r_ip, const unsigned short r_port)
 {
-    udev_obj = u;
-    server_ip = s_ip;
-    server_port = s_p;
+    server_ip = r_ip;
+    server_port = r_port;
+
+    // Initialize udev object.
+    u = std::make_unique<Udev>();
 }
 
 void UsbMonitor::start()
 {
     /* Monitor for usb connections */
-
-    if((mon = udev_monitor_new_from_netlink(udev_obj, "udev")) == nullptr)
-        Utils::err_exit("udev_monitor_new_from_netlink", EXIT_FAILURE);
-
-    if(udev_monitor_filter_add_match_subsystem_devtype(mon, "usb", "usb_device") < 0)
-        Utils::err_exit("udev_monitor_filter_add_match_subsystem_devtype", EXIT_FAILURE);
-
-    if(udev_monitor_enable_receiving(mon) < 0)
-        Utils::err_exit("udev_monitor_enable_receiving", EXIT_FAILURE);
-
-    int fd = udev_monitor_get_fd(mon);
-
-    if(fd < 0)
-        Utils::err_exit("udev_monitor_get_fd", EXIT_FAILURE);
+    int fd = u->init_monitor();
+    std::unique_ptr<udev_device_ptr> udev_device;
 
     std::cout << "[*] Waiting for usb devices." << '\n';
 
     while(1){
         fd_set fds;
-        struct timeval tv;
         int ret;
 
         FD_ZERO(&fds);
         FD_SET(fd, &fds);
-        tv.tv_sec = 0;
-        tv.tv_usec = 0;
+
+        // Set tv.tv_sec & tv.tv_usec to 0.
+        struct timeval tv = {0, 0};
+
 
         if((ret = select(fd + 1, &fds, nullptr, nullptr, &tv)) < 0){
-            int errsv = errno;
-            Utils::fatal("select", errsv);
+            throw std::runtime_error(std::strerror(errno));
         }
 
         if(ret > 0 && FD_ISSET(fd, &fds)){
-            if((u_dev = udev_monitor_receive_device(mon))){
-                std::string action = udev_device_get_action(u_dev);
-                if(action == "add" || action == "remove")
-                    report_usb_device(action);
+            if((udev_device = u->get_udev_device())){
+                std::string action = udev_device_get_action(*udev_device);
+
+                if(action == "add")
+                    report_usb_connection(action, udev_device.get());
+                else if(action == "remove")
+                    report_usb_disconnection(action, udev_device.get());
+
             }
-            udev_device_unref(u_dev);
+            udev_device_unref(*udev_device);
         }
         Utils::wait();
     }
 }
 
-void UsbMonitor::report_usb_device(const std::string action)
+void UsbMonitor::report_usb_connection(const std::string &action, udev_device_ptr* udev_device)
 {
+    std::cout << "[*] Reporting device connection." << '\n';
+    std::string sysname(udev_device_get_sysname(*udev_device));
 
-    std::string json_string = Utils::serialize_data(action,
-                                                    std::string(udev_device_get_devtype(u_dev)),
-                                                    std::string(udev_device_get_devpath(u_dev)),
-                                                    std::string(udev_device_get_sysname(u_dev)));
-    Utils::send_data(server_ip, server_port, json_string);
+    // Connected device data.
+    devices[sysname].insert(std::make_pair("dev_path", udev_device_get_devpath(*udev_device)));
+    devices[sysname].insert(std::make_pair("dev_manufacturer", udev_device_get_sysattr_value(*udev_device, "manufacturer")));
+    devices[sysname].insert(std::make_pair("product", udev_device_get_sysattr_value(*udev_device, "product")));
+    devices[sysname].insert(std::make_pair("serial", udev_device_get_sysattr_value(*udev_device, "serial")));
+    devices[sysname].insert(std::make_pair("product_id", udev_device_get_sysattr_value(*udev_device, "idProduct")));
+    devices[sysname].insert(std::make_pair("vendor_id", udev_device_get_sysattr_value(*udev_device, "idVendor")));
+    devices[sysname].insert(std::make_pair("speed", udev_device_get_sysattr_value(*udev_device, "speed")));
+    devices[sysname].insert(std::make_pair("max_pkt_size", udev_device_get_sysattr_value(*udev_device, "bMaxPacketSize0")));
+    devices[sysname].insert(std::make_pair("max_power", udev_device_get_sysattr_value(*udev_device, "bMaxPower")));
+
+    // Report device connection to remote server.
+    Utils::send_data(server_ip, server_port, Utils::serialize_data(action, devices[sysname]));
+}
+
+void UsbMonitor::report_usb_disconnection(const std::string &action, udev_device_ptr* udev_device)
+{
+    std::cout << "[*] Device disconnected." << '\n';
+    std::string sysname(udev_device_get_sysname(*udev_device));
+
+    // Report device disconnection to remote server.
+    Utils::send_data(server_ip, server_port, Utils::serialize_data(action, devices[sysname]));
+
+    // Erase disconnected device record.
+    devices.erase(sysname);
 }
 
 void UsbMonitor::signal_handler(int signum)
 {
-    std::cout << "Signal caught (" << signum << ")" << '\n';
+    std::cout << '\r' << "[!] Signal caught (" << signum << ")" << '\n';
     UsbMonitor::stop();
     std::exit(signum);
 }
 
 void UsbMonitor::stop()
 {
-    std::cout << "[*] Shutting down monitor." << std::endl;
-    udev_monitor_unref(mon);
-    udev_unref(udev_obj);
+    std::cout << "[*] Shutting down monitor." << '\n';
+    u.reset(nullptr);
+
+    std::cout << "[*] Flushing devices map." << '\n';
+    devices.clear();
 }
