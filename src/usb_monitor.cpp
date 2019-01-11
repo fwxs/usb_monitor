@@ -58,7 +58,7 @@ void UsbMonitor::start()
 
 void UsbMonitor::report_usb_connection(const std::string &action, udev_device_ptr* udev_device)
 {
-    std::cout << "[*] Reporting device connection." << '\n';
+    std::cout << "[*] Device connected." << '\n';
     std::string sysname(udev_device_get_sysname(*udev_device));
 
     // Connected device data.
