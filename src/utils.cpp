@@ -1,65 +1,52 @@
 #include "utils.hpp"
 
-static int sockfd;
-static struct sockaddr_in server_addr;
+static const int ON = 1;
+static const int OFF = 0;
 
-void Utils::wait()
-{
-    std::this_thread::sleep_for(std::chrono::nanoseconds(Utils::HALF_SEC_NANO));
-}
-
-std::string Utils::serialize_data(const std::string &action,
-                                  const std::map<std::string, std::string> &device_data)
-{
-    Json::Value json_str;
-    Json::StreamWriterBuilder stream_builder;
-
-    json_str["Action"] = action;
-
-    // Pass the values from the device_data map to json_str.
-    for(std::pair<std::string, std::string> element : device_data){
-        json_str[element.first] = element.second;
-    }
-
-    stream_builder["indentation"] = "";
-    stream_builder["commentStyle"] = "None";
-    return Json::writeString(stream_builder, json_str);
-}
-
-void Utils::send_data(const std::string &server_ip, const unsigned short port, const std::string &msg)
-{
-    auto send_sock = std::make_unique<Utils::Socket>(server_ip, port);
-    send_sock->start();
-    send_sock->send_(msg);
-}
-
+// Socket Section.
 void Utils::Socket::start()
 {
+    std::cout << "[*] Establishing connection with [" + _server_ip + ":" << _server_port << "]" << '\n';
     if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0){
         int errsv = errno;
          throw Utils::SocketException(std::strerror(errsv), errsv);
     }
 
     /* Zero out server_addr memory */
-    std::memset(&server_addr, 0, sizeof(struct sockaddr_in));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(server_port);
+    std::memset(&_server_addr, 0, sizeof(struct sockaddr_in));
+    _server_addr.sin_family = AF_INET;
+    _server_addr.sin_port = htons(_server_port);
 
-    if(inet_pton(AF_INET, server_ip.c_str(), &server_addr.sin_addr) <= 0){
+    if(inet_pton(AF_INET, _server_ip.c_str(), &_server_addr.sin_addr) <= 0){
         int errsv = errno;
         throw Utils::SocketException(std::strerror(errsv), errsv);
     }
 
     /* Zero out unused structure variable */
-    std::memset(&server_addr.sin_zero, 0, sizeof(server_addr.sin_zero));
+    std::memset(&_server_addr.sin_zero, 0, sizeof(_server_addr.sin_zero));
+}
 
-    if(connect(sockfd, reinterpret_cast<struct sockaddr *>(&server_addr), sizeof(server_addr)) < 0){
-        int errsv = errno;
-        throw Utils::SocketException(std::strerror(errsv), errsv);
+void Utils::Socket::enable_keep_alive()
+{
+    if(setsockopt(sockfd, SOL_SOCKET, SO_KEEPALIVE, &ON, sizeof (ON)) == -1){
+        std::cerr << "[!] Couldn't set KeepAlive option." << '\n';
+        throw SocketException(std::strerror(errno), errno);
     }
 }
 
-void Utils::Socket::send_(const std::string &msg)
+bool Utils::Socket::establish_connection()
+{
+    if(connect(sockfd, reinterpret_cast<struct sockaddr *>(&_server_addr), sizeof(_server_addr)) < 0){
+        int errsv = errno;
+        if(errsv != EISCONN){
+            std::cerr << "[*] Host is not alive! -> " << std::strerror(errno) << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
+void Utils::Socket::send_data(const std::string &msg)
 {
     if(send(sockfd, msg.c_str(), msg.length(), 0) < 0){
         int errsv = errno;
@@ -73,6 +60,31 @@ void Utils::Socket::stop()
         int errsv = errno;
         throw Utils::SocketException(std::strerror(errsv), errsv);
     }
+}
+// END Socket section.
+
+// Utils Section.
+void Utils::wait()
+{
+    std::this_thread::sleep_for(std::chrono::nanoseconds(Utils::HALF_SEC_NANO));
+}
+
+std::string Utils::serialize_data(const std::string &action, const std::map<std::string, std::string> &device_data)
+{
+    Json::Value json;
+    Json::StreamWriterBuilder stream_builder;
+
+    json["action"] = action;
+
+    // Pass the values from the device_data map to json_str.
+    for(std::pair<std::string, std::string> element : device_data){
+        json[element.first] = element.second;
+    }
+
+    stream_builder["indentation"] = "";
+    stream_builder["commentStyle"] = "None";
+
+    return Json::writeString(stream_builder, json);
 }
 
 uintmax_t Utils::strtoumax_(const char* str)
@@ -100,6 +112,4 @@ void Utils::sigaction_(void (*func)(int))
         throw Utils::SocketException(std::strerror(errsv), errsv);
     }
 }
-
-Utils::SocketException::~SocketException(){}
-Utils::Exception::~Exception(){}
+// END Utils Section
