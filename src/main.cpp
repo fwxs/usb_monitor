@@ -1,23 +1,21 @@
 #include "usb_monitor.hpp"
 
-
 int main(int argc, char** argv)
 {
+    signal(SIGPIPE, SIG_IGN);
     Utils::sigaction_(UsbMonitor::signal_handler);
 
     int exit_status = EXIT_SUCCESS;
 
-    if(argc != 3){
-        std::cout << "Usage: " << argv[0] << " <server ip> <port>" << std::endl;
+    if(argc != 3)
+    {
+        std::cerr << "Usage: " << argv[0] << " <server ip> <port>" << std::endl;
         return exit_status;
     }
 
     try
     {
-        unsigned short portno = static_cast<unsigned short>(Utils::strtoumax_(argv[2]));
-
-        UsbMonitor::init(std::string(argv[1]), portno);
-        UsbMonitor::start();
+        UsbMonitor::start(argv[1], static_cast<unsigned short>(Utils::strtoumax_(argv[2])));
     }
     catch (UdevException &udev_err)
     {
